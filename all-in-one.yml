@@ -1,5 +1,5 @@
 ---
-  - name: prepare server to work with Docker
+  - name: just cook my cluster
     hosts: all
     tasks:
       - name: OS-family on node
