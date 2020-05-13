@@ -16,6 +16,7 @@
  - Deploy Calico CNI to the cluster
  - Deploy traefik with self-signed SSL-cert and WS/WSS support
  - Deploy k8dash as your dashboard
+ - Setup k8dash ingress for answer on /dash prefix
  - Create cronjob for updating control-plane certs each 3 month
 
 ### Features:

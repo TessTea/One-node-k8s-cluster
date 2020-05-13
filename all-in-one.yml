@@ -318,6 +318,12 @@
           http_proxy: "{{proxy_http}}"
           https_proxy: "{{proxy_https}}"
 
+      - name: apply k8dash-ingress
+        command: kubectl apply -f https://raw.githubusercontent.com/TessTea/traefik/master/1.7/dash-traefik-ingress.yml
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
       - name: untaint node
         command: kubectl taint nodes --all node-role.kubernetes.io/master-
 
