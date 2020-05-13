@@ -10,7 +10,7 @@
  - Add insecure registry to your docker daemon-json(by default it will be your host default ip)
  - Disable firewall
  - Disable SELinux
- - Disable swap(double check it in fstba, it now doesn't work perfectly)
+ - Disable swap(double check it in fstab, it now doesn't work perfectly)
  - Install kubelet, kubectl, kubeadm
  - Bootstrap cluster
  - Deploy Calico CNI to the cluster
