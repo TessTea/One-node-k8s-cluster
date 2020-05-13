@@ -1,0 +1,333 @@
+---
+  - name: prepare server to work with Docker
+    hosts: all
+    tasks:
+      - name: OS-family on node
+        debug:
+         msg: "OS family on {{ansible_nodename}}: {{ansible_os_family}}"
+
+      - name: Turn off swap
+        shell: swapoff -a
+
+      - name: Permanently disable swap in fstab
+        replace:
+          path: "/etc/fstab"
+          regexp: '^(.+?\sswap\s+sw\s+.*)$'
+          replace: '# \1'
+
+      - name: Disable SELinux
+        when: ansible_os_family == "RedHat"
+        selinux:
+          state: disabled
+
+      - name: Disable firewalld
+        when: ansible_os_family == "RedHat"
+        service:
+          name: firewalld
+          enabled: no
+          state: stopped
+
+      - name: Disable ufw
+        when: ansible_os_family == "Debian"
+        service:
+          name: ufw
+          enabled: no
+          state: stopped
+
+## Here starts the docker installing
+
+      - name: remove old packages RedHat
+        when: ansible_os_family == "RedHat"
+        yum:
+          name: "{{item}}"
+          state: removed
+        with_items:
+          - docker
+          - docker-client
+          - docker-client-latest
+          - docker-common
+          - docker-latest
+          - docker-latest-logrotate
+          - docker-logrotate
+          - docker-engine
+
+      - name: remove old packages Debian
+        when: ansible_os_family == "Debian"
+        apt:
+          name: "{{item}}"
+          state: removed
+        with_items:
+          - docker
+          - docker.io
+          - containerd
+          - runc
+          - docker-engine
+
+      - name: install packages RedHat
+        when: ansible_os_family == "RedHat"
+        yum:
+          name: "{{item}}"
+          state: present
+          update_cache: yes
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+        with_items:
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+
+      - name: install packages Debian
+        when: ansible_os_family == "Debian"
+        apt:
+          name: "{{item}}"
+          state: present
+          update_cache: yes
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+        with_items:
+          - apt-transport-https
+          - ca-certificates
+          - curl 
+          - gnupg2
+          - software-properties-common
+
+      - name: Download get docker script
+        get_url: 
+          url: https://get.docker.com/
+          dest: ~/get_docker.sh
+          mode: '0777'
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+          
+      - name: Execute get docker script
+        command: ~/get_docker.sh
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: create /etc/daemon directory
+        file:
+          path: /etc/docker
+          state: directory
+          
+      - name: configure daemon.json
+        template:
+          src: templates/daemon.json.j2
+          dest: /etc/docker/daemon.json
+
+      - name: create proxy directory for docker
+        when: proxy == "yes"
+        file:
+          path: /etc/systemd/system/docker.service.d
+          state: directory
+
+      - name: configure proxy for docker
+        when: proxy == "yes"
+        template:
+          src: "templates/{{item.src}}"
+          dest: "/etc/systemd/system/docker.service.d/{{item.dst}}"
+        with_items:
+        - {src: 'https-proxy.conf.j2', dst: 'https-proxy.conf'}
+
+      - name: daemon reload
+        systemd:
+         daemon_reload: yes
+
+      - name: start docker
+        service: 
+          name: docker
+          state: restarted
+          enabled: yes
+
+      - name: Add the user from hosts-file to docker group
+        user:
+          name: "{{user}}"
+          group: docker
+
+## Here starts th docker home-folder switching
+
+      - name: stop docker
+        service: 
+          name: docker
+          state: stopped
+          enabled: yes
+
+      - name: Move docker folder
+        command: mv /var/lib/docker "{{new_home}}/"
+
+      - name: Create symbolic link to /var/lib/docker
+        file:
+          state: link
+          src: "{{new_home}}/docker"
+          dest: /var/lib/docker
+
+      - name: daemon reload
+        systemd:
+         daemon_reload: yes
+
+      - name: start docker
+        service: 
+          name: docker
+          state: started
+          enabled: yes
+
+## Here starts K8S installing
+
+      - name: install "apt-transport-https curl" "Debian"
+        when: ansible_os_family == "Debian"
+        apt: 
+         name: "{{item}}"
+         state: present
+         update_cache: yes
+        environment: 
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+        with_items:
+          - apt-transport-https
+          - curl
+
+      - name: curl for package "Debian"
+        when: ansible_os_family == "Debian"
+        shell: "curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -"
+        environment: 
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: add package source to package-list "Debian"
+        when: ansible_os_family == "Debian"
+        template:
+          src: "templates/kubernetes.list.j2"
+          dest: "/etc/apt/sources.list.d/kubernetes.list"
+
+
+      - name: install "kubelet, kubeadm, kubectl" "Debian"
+        when: ansible_os_family == "Debian"
+        apt:
+         name: "{{item}}"
+         state: present
+         update_cache: yes
+        environment:
+         http_proxy: "{{proxy_http}}"
+         https_proxy: "{{proxy_https}}"
+        with_items:
+        - kubelet
+        - kubectl
+        - kubeadm
+        - bash-completion
+
+      - name: add repository "RedHat"
+        when: ansible_os_family == "RedHat"
+        template:
+          src: "templates/kubernetes.repo.j2"
+          dest: "/etc/yum.repos.d/kubernetes.repo"
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: Dirty Hack "RedHat"
+        when: ansible_os_family == "RedHat"
+        shell: 
+         cmd: echo -e "y" | yum repolist
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+            
+      - name: install "kubeadm, kubelet, kubectl" "RedHat"
+        when: ansible_os_family == "RedHat"
+        yum: 
+          name: "{{item}}"
+          state: present
+          update_cache: yes
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+        with_items:
+          - kubelet
+          - kubectl
+          - kubeadm
+          - bash-completion
+
+      - name: configure required binary
+        become: yes
+        sysctl:
+         name: net.bridge.bridge-nf-call-iptables
+         value: 1
+         sysctl_set: yes
+         state: present
+         reload: yes
+
+      - name: Enable and start kubelet
+        service:
+          name: kubelet
+          enabled: yes
+          state: restarted
+
+## Here starts cluster-bootstraping
+
+      - name: init cluster
+        command: kubeadm init --upload-certs --pod-network-cidr=192.168.0.0/16
+
+      - name: copy config to roots home-folder
+        command: "mkdir -p $HOME/.kube"
+
+      - name: copy config to roots home-folder
+        command: sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+
+      - name: copy config to roots home-folder
+        command: "sudo chown {{user}}:{{user}} $HOME/.kube/config"
+
+      - name: deploy calico
+        command: kubectl apply -f https://docs.projectcalico.org/v3.14/manifests/calico.yaml
+
+      - name: create treaefik-certs script pull
+        get_url: 
+          url: https://raw.githubusercontent.com/TessTea/traefik/master/1.7/cert
+          dest: ~/traefik-cert
+          mode: '0777'
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: create traefik-certs script
+        command: ~/traefik-cert
+
+      - name: apply traefik RBAC
+        command: kubectl apply -f https://raw.githubusercontent.com/TessTea/traefik/master/1.7/traefik-RBAC.yml
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: apply traefik configmap
+        command: kubectl apply -f https://raw.githubusercontent.com/TessTea/traefik/master/1.7/configmap.yml
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: apply traefik itself
+        command: kubectl apply -f https://raw.githubusercontent.com/TessTea/traefik/master/1.7/traefik-ds.yml
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: apply k8dash
+        command: kubectl apply -f https://raw.githubusercontent.com/herbrandson/k8dash/master/kubernetes-k8dash.yaml
+        environment:
+          http_proxy: "{{proxy_http}}"
+          https_proxy: "{{proxy_https}}"
+
+      - name: untaint node
+        command: kubectl taint nodes --all node-role.kubernetes.io/master-
+
+## Here starts creating the cronjob to update certs
+
+      - name: create the cronjob to update control-plane certs every 3 month
+        cron:
+          name: "cluster certs update"
+          minute: "0"
+          hour: "0"
+          month: "*/3"
+          job: " kubeadm alpha certs renew all"    
+          state: present  

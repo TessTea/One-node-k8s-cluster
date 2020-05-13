@@ -1,0 +1,13 @@
+[hosts]
+
+[hosts:vars]
+user=root
+ansible_connection=ssh
+#ansible_ssh_pass=
+#ansible_become_pass =
+# For proxy just "yes" works
+proxy=no
+proxy_http=
+proxy_https=
+insecure_registries={{ansible_default_ipv4.address}}:5000
+new_home=/data
