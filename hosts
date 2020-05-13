@@ -10,4 +10,4 @@ proxy=no
 proxy_http=
 proxy_https=
 insecure_registries={{ansible_default_ipv4.address}}:5000
-new_home=/data
+new_home=/home
